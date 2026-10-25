@@ -1,5 +1,5 @@
 // Offline cache: downloads every app file once, then works with no internet.
-const CACHE = "pose-studio-standalone-v1";
+const CACHE = "pose-studio-standalone-v2";
 self.addEventListener("install", (e) => {
   e.waitUntil((async () => {
     const files = await (await fetch("files.json", { cache: "no-cache" })).json();
@@ -17,6 +17,10 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   e.respondWith((async () => {
+    const u = new URL(e.request.url);
+    if (e.request.mode === "navigate" || u.pathname.endsWith("/index.html")) {
+      try { const r = await fetch(e.request); return r; } catch (_) {}
+    }
     const hit = await caches.match(e.request, { ignoreSearch: true });
     if (hit) return hit;
     try { return await fetch(e.request); } catch (_) { return new Response("offline", { status: 503 }); }
