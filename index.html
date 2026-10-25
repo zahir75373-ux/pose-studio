@@ -48,10 +48,28 @@
   });
   const up = e => { pts.delete(e.pointerId); lastDist = 0; };
   cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
-  const mk = (txt, top, sc) => { const b = document.createElement("button"); b.textContent = txt;
-    b.style.cssText = `position:fixed;left:8px;top:${top}px;width:44px;height:44px;font-size:26px;border-radius:22px;border:1px solid #888;background:rgba(30,30,40,.75);color:#fff;z-index:9998;touch-action:manipulation`;
-    b.addEventListener("click", () => zoomBy(sc)); document.body.appendChild(b); };
-  mk("+", 8, 0.8); mk("\u2212", 60, 1.25);
+  // UI size (panel text/buttons) - bigger by default on phones, adjustable with A- / A+
+  const root = studio.container;
+  let ui = parseFloat(localStorage.getItem("ps-ui-mult") || (("ontouchstart" in window) ? "2" : "1"));
+  const origScale = studio.updateMainUIScale.bind(studio);
+  studio.updateMainUIScale = (opts = {}) => {
+    origScale({ ...opts, force: true });
+    const st = root.style;
+    st.setProperty("--vnccs-ps-ui-scale", (parseFloat(st.getPropertyValue("--vnccs-ps-ui-scale")) * ui).toFixed(3));
+    st.setProperty("--vnccs-ps-relative-ui-scale", (parseFloat(st.getPropertyValue("--vnccs-ps-relative-ui-scale")) * ui * 1.8).toFixed(3));
+    return true;
+  };
+  const applyUi = () => { localStorage.setItem("ps-ui-mult", ui); studio.updateMainUIScale({ force: true }); studio.resize(); };
+  applyUi();
+  const bar = document.createElement("div");
+  bar.style.cssText = "position:fixed;left:50%;top:6px;transform:translateX(-50%);display:flex;gap:6px;z-index:9998";
+  const mk = (txt, fn) => { const b = document.createElement("button"); b.textContent = txt;
+    b.style.cssText = "min-width:40px;height:34px;font-size:16px;border-radius:17px;border:1px solid #888;background:rgba(30,30,40,.8);color:#fff;touch-action:manipulation;padding:0 8px";
+    b.addEventListener("click", fn); bar.appendChild(b); };
+  mk("\u2212", () => zoomBy(1.25)); mk("+", () => zoomBy(0.8));
+  mk("A\u2212", () => { ui = Math.max(1, +(ui - 0.25).toFixed(2)); applyUi(); });
+  mk("A+", () => { ui = Math.min(4, +(ui + 0.25).toFixed(2)); applyUi(); });
+  document.body.appendChild(bar);
   document.getElementById("msg").remove();
   window.addEventListener("resize", () => { node.size = [innerWidth, innerHeight]; studio.resize(); });
 </script>
