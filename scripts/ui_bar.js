@@ -13,6 +13,32 @@ export function row(parent, css = "") { const r = el("div", "display:flex;align-
 export function install(studio) {
   if (studio.ui) return studio.ui;
   const ui = { tools: new Map(), openId: null };
+  // popup placement (remembered on this phone): pos = "top" | "bottom", cx = horizontal centre in px (null = centred), min = collapsed to a small tab
+  const KEY = "ps-sheet-v1";
+  ui.sheetState = { pos: "bottom", cx: null, min: false };
+  try { Object.assign(ui.sheetState, JSON.parse(localStorage.getItem(KEY) || "{}"), { min: false }); } catch (_) {}
+  ui.saveSheet = () => { try { localStorage.setItem(KEY, JSON.stringify({ pos: ui.sheetState.pos, cx: ui.sheetState.cx })); } catch (_) {} };
+  ui.layout = () => {
+    const t = ui.tools.get(ui.openId); if (!t) return;
+    const S = ui.sheetState, sh = t.sheet;
+    sh.style.width = S.min ? "auto" : "min(96vw,560px)";
+    sh.style.minWidth = S.min ? "150px" : "";
+    sh.style.maxWidth = "96vw";
+    t.body.style.display = S.min ? "none" : "";
+    t.bMin.innerHTML = S.min ? "\u25A2" : "\u2581"; t.bMin.title = S.min ? "\u09AC\u09DC \u0995\u09B0\u09C1\u09A8" : "\u099B\u09CB\u099F \u0995\u09B0\u09C1\u09A8";
+    sh.style.display = "flex"; sh.style.transform = "none";
+    const w = sh.getBoundingClientRect().width;
+    const cx = S.cx == null ? innerWidth / 2 : S.cx;
+    sh.style.left = Math.max(2, Math.min(innerWidth - w - 2, cx - w / 2)) + "px";
+    if (S.pos === "top") {
+      const tb = document.getElementById("topBar"); let y = 4;
+      if (tb) { const q = tb.getBoundingClientRect(); if (q.height) y = Math.round(q.bottom + 4); }
+      sh.style.top = y + "px"; sh.style.bottom = "auto"; sh.style.maxHeight = Math.max(90, Math.round(innerHeight * 0.36)) + "px";
+    } else { sh.style.top = "auto"; sh.style.bottom = "4px"; sh.style.maxHeight = Math.max(90, Math.round(innerHeight * 0.36)) + "px"; }
+  };
+  ui.setPos = (p) => { ui.sheetState.pos = p; ui.saveSheet(); ui.layout(); };
+  ui.setMin = (m) => { ui.sheetState.min = !!m; ui.layout(); };
+  window.addEventListener("resize", () => ui.layout());
   const bar = el("div", "position:fixed;z-index:9990;display:flex;flex-wrap:wrap;gap:5px;justify-content:center;align-content:flex-end;touch-action:manipulation;left:50%;transform:translateX(-50%);bottom:130px;width:96px");
   bar.id = "psToolbar";
   document.body.appendChild(bar);
@@ -20,21 +46,53 @@ export function install(studio) {
   ui.addTool = (id, label, { title, onOpen, onClose } = {}) => {
     const b = btn(bar, label, () => ui.toggle(id), "flex:1 1 88px;height:34px;border-radius:17px;border:1px solid #888;background:rgba(30,30,40,.88);padding:0 6px;font-size:13px");
     b.id = "tool_" + id; if (title) b.title = title;
-    const sheet = el("div", "position:fixed;left:50%;bottom:4px;transform:translateX(-50%);width:min(98vw,720px);max-height:60vh;overflow-y:auto;z-index:9995;background:rgba(18,18,28,.95);border:1px solid #888;border-radius:12px;padding:4px 8px 6px;color:#fff;font:" + FONT + ";display:none;touch-action:manipulation;box-sizing:border-box");
+    // compact floating popup: small (max ~36% of the screen height, scrolls inside), movable top/bottom, collapsible to a small tab.
+    // Only the popup's own rectangle takes touches; the 3D canvas around it keeps every gesture (nothing here is a full-screen overlay).
+    const sheet = el("div", "position:fixed;z-index:9995;display:none;flex-direction:column;width:min(96vw,560px);max-height:36vh;background:rgba(18,18,28,.95);border:1px solid #888;border-radius:12px;padding:3px 8px 4px;color:#fff;font:" + FONT + ";touch-action:manipulation;box-sizing:border-box;pointer-events:auto");
     sheet.id = "sheet_" + id;
-    const head = el("div", "display:flex;align-items:center;justify-content:space-between;gap:6px");
-    head.appendChild(el("b", "font-size:14px", label));
-    btn(head, "\u2715 \u09AC\u09A8\u09CD\u09A7", () => ui.close(), "height:28px;border-radius:14px");
+    const head = el("div", "display:flex;align-items:center;gap:5px;flex:none;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none");
+    head.id = "sheetHead_" + id;
+    head.appendChild(el("span", "font-size:16px;opacity:.7;flex:none", "\u283F"));             // ⠿ drag handle
+    head.appendChild(el("b", "font-size:14px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis", label));
+    const quick = el("span", "display:inline-flex;gap:4px;flex:none"); head.appendChild(quick);
+    const HB = "min-width:34px;height:26px;border-radius:13px;padding:0 6px";
+    const bMove = btn(head, "\u21C5", () => ui.setPos(ui.sheetState.pos === "top" ? "bottom" : "top"), HB);   // ⇅ top <-> bottom
+    bMove.title = "\u0989\u09AA\u09B0\u09C7/\u09A8\u09BF\u099A\u09C7";
+    const bMin = btn(head, "\u2581", () => ui.setMin(!ui.sheetState.min), HB);                              // ▁ collapse / expand
+    bMin.title = "\u099B\u09CB\u099F \u0995\u09B0\u09C1\u09A8";
+    btn(head, "\u2715", () => ui.close(), HB);
     sheet.appendChild(head);
-    const body = el("div"); sheet.appendChild(body);
+    const body = el("div", "flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch");
+    sheet.appendChild(body);
     document.body.appendChild(sheet);
-    const t = { id, button: b, sheet, body, onOpen, onClose };
+    // drag by the header: free left/right, on release it snaps to the top or the bottom edge; remembered
+    let drag = null;
+    head.addEventListener("pointerdown", (e) => {
+      if (e.target.closest("button")) return;
+      const r = sheet.getBoundingClientRect(); drag = { id: e.pointerId, ox: e.clientX - r.left, oy: e.clientY - r.top, moved: false };
+      try { head.setPointerCapture(e.pointerId); } catch (_) {}
+      head.style.cursor = "grabbing";
+    });
+    head.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return; drag.moved = true;
+      const r = sheet.getBoundingClientRect();
+      const x = Math.max(0, Math.min(innerWidth - r.width, e.clientX - drag.ox)), y = Math.max(0, Math.min(innerHeight - r.height, e.clientY - drag.oy));
+      sheet.style.transform = "none"; sheet.style.left = x + "px"; sheet.style.top = y + "px"; sheet.style.bottom = "auto";
+      drag.x = x; drag.y = y; drag.w = r.width; drag.h = r.height;
+    });
+    const endDrag = (e) => {
+      if (!drag || e.pointerId !== drag.id) return; const d = drag; drag = null; head.style.cursor = "grab";
+      if (!d.moved) return;
+      ui.sheetState.cx = d.x + d.w / 2; ui.sheetState.pos = d.y + d.h / 2 < innerHeight / 2 ? "top" : "bottom"; ui.saveSheet(); ui.layout();
+    };
+    head.addEventListener("pointerup", endDrag); head.addEventListener("pointercancel", endDrag);
+    const t = { id, button: b, sheet, body, head, quick, bMin, onOpen, onClose };
     ui.tools.set(id, t); return t;
   };
   ui.open = (id) => {
     const t = ui.tools.get(id); if (!t) return;
     if (ui.openId && ui.openId !== id) ui.close();
-    ui.openId = id; t.sheet.style.display = "block"; bar.style.visibility = "hidden";
+    ui.openId = id; ui.sheetState.min = false; ui.layout(); bar.style.visibility = "hidden";
     try { t.onOpen && t.onOpen(); } catch (e) { console.warn(e); }
   };
   ui.close = () => {

@@ -1,5 +1,5 @@
 // Offline cache: downloads every app file once, then works with no internet.
-const CACHE = "pose-studio-standalone-v6";
+const CACHE = "pose-studio-standalone-v6-1";
 self.addEventListener("install", (e) => {
   e.waitUntil((async () => {
     const files = await (await fetch("files.json", { cache: "no-cache" })).json();

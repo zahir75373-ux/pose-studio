@@ -341,11 +341,29 @@ export function install(studio) {
   const swallow = (e) => { e.stopImmediatePropagation(); e.preventDefault(); };
   const drawing = () => api.state.on && api.state.tool !== "nav";
   const pointers = new Set();
+  // Two fingers while pen/eraser is active = move the CAMERA (pinch = zoom, both fingers sliding = pan). The vendor's own
+  // handlers never see these touches (we swallow them so a stroke is not drawn by accident), so the camera is moved here.
+  const tpos = new Map(); let gLast = null;
+  const gesture = () => {
+    const [a, b] = [...tpos.values()]; if (!a || !b) { gLast = null; return; }
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (gLast && d > 0 && gLast.d > 0) {
+      const cam = v.camera, tg = v.orbit.target, h = cv.getBoundingClientRect().height || 1;
+      const dist = cam.position.distanceTo(tg), k = (2 * dist * Math.tan((cam.fov * Math.PI) / 360)) / h;
+      const right = new T.Vector3().setFromMatrixColumn(cam.matrix, 0), up = new T.Vector3().setFromMatrixColumn(cam.matrix, 1);
+      const pan = right.multiplyScalar(-(mid.x - gLast.x) * k).add(up.multiplyScalar((mid.y - gLast.y) * k));
+      cam.position.add(pan); tg.add(pan);
+      cam.position.sub(tg).multiplyScalar(Math.min(1.25, Math.max(0.8, gLast.d / d))).add(tg);
+      v.orbit.update(); v.requestRender();
+    }
+    gLast = { x: mid.x, y: mid.y, d };
+  };
   cv.addEventListener("pointerdown", (e) => {
     if (!drawing()) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;         // middle/right mouse keep pan/rotate
     pointers.add(e.pointerId);
-    if (pointers.size > 1) { cancelStroke(); eraseG = null; swallow(e); return; }   // 2nd finger: drop the stroke, do not rotate by accident
+    if (e.pointerType === "touch") { tpos.set(e.pointerId, { x: e.clientX, y: e.clientY }); gLast = null; }
+    if (pointers.size > 1) { cancelStroke(); eraseG = null; ringEl.style.display = "none"; swallow(e); if (tpos.size === 2) gesture(); return; }   // 2nd finger: drop the stroke, move the camera instead
     swallow(e);
     try { cv.setPointerCapture(e.pointerId); } catch (_) {}
     activePointer = e.pointerId;
@@ -353,6 +371,7 @@ export function install(studio) {
     else startStroke(e.clientX, e.clientY);
   }, true);
   cv.addEventListener("pointermove", (e) => {
+    if (tpos.has(e.pointerId)) { tpos.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (tpos.size === 2) { swallow(e); gesture(); return; } }
     if (api.state.on && api.state.tool === "erase" && (e.pointerType === "mouse" || pointers.has(e.pointerId))) ring(e.clientX, e.clientY);
     if (!drawing() && !draft && !eraseG) return;
     if (e.pointerType === "mouse" && !draft && !eraseG && e.buttons === 0) return;
@@ -366,6 +385,7 @@ export function install(studio) {
     }
   }, true);
   const up = (cancel) => (e) => {
+    tpos.delete(e.pointerId); gLast = null;
     if (!pointers.has(e.pointerId) && !draft && !eraseG) return;
     swallow(e); pointers.delete(e.pointerId);
     if (e.pointerId === activePointer) {
@@ -398,6 +418,7 @@ export function install(studio) {
   const tool = ui.addTool("cloth", "\u270F\uFE0F \u09AA\u09CB\u09B6\u09BE\u0995", { title: "\u09AA\u09CB\u09B6\u09BE\u0995\u09C7\u09B0 \u09B0\u09C7\u0996\u09BE \u0986\u0981\u0995\u09BE",
     onOpen: () => { api.state.on = true; if (api.state.tool === "nav") api.state.tool = "draw"; sync(); }, onClose: () => { api.state.on = false; cancelStroke(); eraseG = null; ringEl.style.display = "none"; sync(); } });
   const panel = tool.body;
+  const quickBtn = btn(tool.quick, "\u270B", () => { api.state.tool = api.state.tool === "nav" ? "draw" : "nav"; sync(); }, "min-width:34px;height:26px;border-radius:13px;padding:0 6px");   // quick pen <-> turn-the-view switch (works while collapsed)
   const r1 = row(panel), r2 = row(panel), r3 = row(panel), r4 = row(panel), r5b = row(panel);
   const drawBtn = btn(r1, "\u270F\uFE0F \u0986\u0981\u0995\u09C1\u09A8", () => { api.state.tool = "draw"; sync(); });
   const eraseBtn = btn(r1, "\u{1F9FD} \u09B0\u09BE\u09AC\u09BE\u09B0", () => { api.state.tool = "erase"; sync(); });
@@ -454,6 +475,7 @@ export function install(studio) {
     mark(drawBtn, s.tool === "draw"); mark(eraseBtn, s.tool === "erase"); mark(navBtn, s.tool === "nav");
     mark(lineBtn, s.mode === "line"); mark(fillBtn, s.mode === "fill");
     swatches.forEach((b, i) => { b.style.borderColor = PALETTE[i] === s.color ? "#4cf" : "#666"; b.style.borderWidth = PALETTE[i] === s.color ? "3px" : "2px"; });
+    quickBtn.innerHTML = s.tool === "nav" ? "\u270F\uFE0F" : "\u270B"; mark(quickBtn, s.tool === "nav");
     mark(xrayBtn, s.xray); mark(showBtn, s.show); mark(capBtn, s.inCapture);
     const sel = api.strokes.find((q) => q.id === s.selected);
     if (s.tool === "erase") { wLab.textContent = "\u09B0\u09BE\u09AC\u09BE\u09B0\u09C7\u09B0 \u09B8\u09BE\u0987\u099C"; wLab.style.color = "#fff"; wSl.min = 6; wSl.max = 60; wSl.step = 1; wSl.value = s.eraser; wVal.textContent = String(s.eraser); }
