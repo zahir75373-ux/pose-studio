@@ -1,10 +1,14 @@
 // Offline cache: downloads every app file once, then works with no internet.
-const CACHE = "pose-studio-standalone-v3";
+const CACHE = "pose-studio-standalone-v6";
 self.addEventListener("install", (e) => {
   e.waitUntil((async () => {
     const files = await (await fetch("files.json", { cache: "no-cache" })).json();
     const cache = await caches.open(CACHE);
-    await cache.addAll(files);
+    // App files are required; bundled pose-library files are best-effort so one missing file never breaks install.
+    const core = files.filter((f) => !f.startsWith("pose_library/"));
+    const optional = files.filter((f) => f.startsWith("pose_library/"));
+    await cache.addAll(core);
+    await Promise.allSettled(optional.map((f) => cache.add(f)));
     self.skipWaiting();
   })());
 });

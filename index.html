@@ -22,8 +22,14 @@
   // Fake "node": the widget only needs an id, a size, and a hidden pose_data widget holding JSON state.
   const node = { id: "standalone", size: [window.innerWidth, window.innerHeight],
                  widgets: [{ name: "pose_data", value: "{}" }, { name: "animation_image_batch", value: false }] };
+  // Offline Pose Library (answers /vnccs/pose_library/* itself) - see scripts/pose_library_local.js. Must be installed before the studio is used.
+  let poseLib = null;
+  try { poseLib = await import("./scripts/pose_library_local.js"); poseLib.installFetch(); } catch (e) { console.warn("pose_library_local unavailable:", e); }
   const studio = new PoseStudioWidget(node);
+  if (poseLib) { poseLib.installStudio(studio); poseLib.installSceneRestore(studio); }
   window.studio = studio;
+  // Scene export/import (all characters in one JSON) - see scripts/scene_io.js
+  import("./scripts/scene_io.js").then(m => m.install(studio)).catch(err => console.warn("scene_io unavailable:", err));
   document.getElementById("host").appendChild(studio.container);
   await studio._viewerInitPromise;
   studio.loadFromNode();
@@ -61,7 +67,7 @@
   };
   const applyUi = () => { localStorage.setItem("ps-ui-mult", ui); studio.updateMainUIScale({ force: true }); studio.resize(); };
   applyUi();
-  const bar = document.createElement("div");
+  const bar = document.createElement("div"); bar.id = "topBar";
   bar.style.cssText = "position:fixed;left:50%;top:6px;transform:translateX(-50%);display:flex;gap:6px;z-index:9998";
   const mk = (txt, fn) => { const b = document.createElement("button"); b.textContent = txt;
     b.style.cssText = "min-width:40px;height:34px;font-size:16px;border-radius:17px;border:1px solid #888;background:rgba(30,30,40,.8);color:#fff;touch-action:manipulation;padding:0 8px";
@@ -71,6 +77,16 @@
   mk("A+", () => { ui = Math.min(4, +(ui + 0.25).toFixed(2)); applyUi(); });
   document.body.appendChild(bar);
   document.getElementById("msg").remove();
+  // --- v6 add-ons (each is its own file in scripts/; a failing one never stops the app) ---
+  (async () => {
+    const warn = (n) => (e) => console.warn(n + " unavailable:", e);
+    try { (await import("./scripts/ui_bar.js")).install(studio); } catch (e) { warn("ui_bar")(e); return; }      // shared toolbar + bottom sheets
+    try { (await import("./scripts/touch_modes.js")).install(studio); } catch (e) { warn("touch_modes")(e); }      // position drag + joint long press
+    try { (await import("./scripts/group_tools.js")).installPanel(studio); } catch (e) { warn("group_tools")(e); } // group scale / rotate / depth
+    try { (await import("./scripts/cloth3d.js")).install(studio); } catch (e) { warn("cloth3d")(e); }             // 3D clothing strokes
+    try { (await import("./scripts/number_entry.js")).install(studio); } catch (e) { warn("number_entry")(e); }   // tap a slider number to type it
+    try { (await import("./scripts/autosave.js")).install(studio); } catch (e) { warn("autosave")(e); }           // autosave + restore prompt
+  })();
   window.addEventListener("resize", () => { node.size = [innerWidth, innerHeight]; studio.resize(); });
 </script>
 </body>
